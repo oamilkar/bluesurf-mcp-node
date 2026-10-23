@@ -1,54 +1,57 @@
 # bluesurf-mcp (Node.js)
 
 Servidor MCP local de **solo lectura** para que Cursor u otros agentes lean
-tickets de **BlueSurf**. Es el port a Node.js del paquete Python
-[`bluesurf-mcp`](../bluesurf-mcp): mismas tools, mismas variables de entorno y
-el mismo CLI (`login`, `logout`, y sin argumentos el servidor por stdio).
+tickets de **BlueSurf**. 
+El CLI es `login`, `logout`, y sin argumentos el servidor por stdio.
 
 **Solo lectura por diseño:** no hay operaciones de escritura. El kanban se
 consulta con un POST de filtro.
 
-Hace falta **Node.js 20 o superior**. El paquete Python no se modifica y sigue
-siendo el distro de PyPI.
+Hace falta **Node.js 20 o superior**.
 
 ## Instalación
+
+```bash
+npm install -g bluesurf-mcp
+bluesurf-mcp --help
+```
+
+## Desarrollo
 
 Desde esta carpeta:
 
 ```bash
 npm install
 npm run build
+npm test
 node dist/bin.js --help
 ```
 
-`npm test` compila y corre la suite (sin red).
+`npm test` compila y corre la suite (sin red).  
+`npm publish` compila antes de empaquetar. 
 
 ## Guardar credenciales (`login` / `logout`)
 
 La contraseña no va en `mcp.json`. Una vez, en una terminal:
 
 ```bash
-node dist/bin.js login
+bluesurf-mcp login
 ```
 
 Pide usuario y contraseña, valida contra BlueSurf y guarda la contraseña en el
 almacén del sistema (Credential Manager en Windows, Keychain en macOS, Secret
 Service en Linux). El username queda en un JSON local, sin la contraseña.
 
-Este almacén es propio del port. El servicio se llama `bluesurf-mcp-node` y el
-usuario vive en:
+El servicio se llama `bluesurf-mcp-node` y el usuario vive en:
 
 - Windows: `%LOCALAPPDATA%\bluesurf-mcp-node\config.json`
 - macOS / Linux: `~/.config/bluesurf-mcp-node/config.json` (o `XDG_CONFIG_HOME`)
 
-Un `login` hecho con el paquete Python sigue en su almacén. Aquí hay que entrar
-con este binario.
-
 ```bash
-node dist/bin.js logout
+bluesurf-mcp logout
 ```
 
-borra lo guardado por este port.
+borra lo guardado.
 
 ## Configuración (variables de entorno)
 
@@ -60,7 +63,7 @@ Claves canónicas `BLUESURF_*`; se aceptan `SURF_*` como fallback.
 - `BLUESURF_COOKIE` — cookie de sesión ya válida → usa `CookieAuth`.
 - `BLUESURF_USERNAME` + `BLUESURF_PASSWORD` — credenciales → usa `CredentialsAuth`.
 
-Precedencia: cookie en env → usuario/contraseña en env → `node dist/bin.js login`.
+Precedencia: cookie en env → usuario/contraseña en env → `bluesurf-mcp login`.
 
 El núcleo no persiste secretos. La cookie de sesión vive en memoria mientras
 corre el proceso.
@@ -68,7 +71,7 @@ corre el proceso.
 ## Correr el servidor
 
 ```bash
-node dist/bin.js
+bluesurf-mcp
 ```
 
 Se comunica por **stdio**. Sin argumentos no pide contraseña: usa el entorno o
@@ -76,22 +79,32 @@ las credenciales de `login`.
 
 ## Registrar el MCP en Cursor
 
-`command` es `node` y `args` apunta al `dist/bin.js` compilado. Así no choca
-con el ejecutable `bluesurf-mcp` del paquete Python si también está en el PATH.
+Con el paquete instalado de forma global:
 
 ```json
 {
   "mcpServers": {
     "bluesurf": {
-      "command": "node",
-      "args": ["D:\\ruta\\completa\\bluesurf-mcp-node\\dist\\bin.js"]
+      "command": "bluesurf-mcp"
     }
   }
 }
 ```
 
-En el JSON de Windows las barras invertidas van dobles. Las variables
-`BLUESURF_*` en `env` siguen siendo válidas como override.
+`npx` descarga el paquete y ejecuta su binario:
+
+```json
+{
+  "mcpServers": {
+    "bluesurf": {
+      "command": "npx",
+      "args": ["-y", "bluesurf-mcp"]
+    }
+  }
+}
+```
+
+`-y` evita la pregunta de confirmación de npx. Las variables `BLUESURF_*` en `env` siguen siendo válidas como override.
 
 ## Tools expuestas (solo lectura)
 
@@ -103,10 +116,12 @@ En el JSON de Windows las barras invertidas van dobles. Las variables
 
 ## Usar el cliente desde Node
 
-Tras `npm run build`:
+```bash
+npm install bluesurf-mcp
+```
 
 ```javascript
 import { BlueSurfClient, CredentialsAuth } from "bluesurf-mcp";
 ```
 
-El consumidor entrega las credenciales o la cookie. El paquete no las guarda.
+El paquete es solo ESM. El consumidor entrega las credenciales o la cookie. El paquete no las guarda.

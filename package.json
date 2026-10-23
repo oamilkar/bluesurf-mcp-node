@@ -1,26 +1,38 @@
 {
-  "name": "@bluepeople/bluesurf-mcp",
+  "name": "bluesurf-mcp",
   "version": "0.2.0",
   "description": "Servidor MCP local para leer tickets de BlueSurf",
   "type": "module",
   "license": "MIT",
   "author": "oamilkar",
-  "keywords": ["bluesurf", "mcp", "tickets"],
+  "keywords": [
+    "bluesurf",
+    "bluepeople",
+    "mcp",
+    "tickets"
+  ],
   "bin": {
     "bluesurf-mcp": "./dist/bin.js"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
     "test": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js"
   },
   "dependencies": {
@@ -31,5 +43,17 @@
   "devDependencies": {
     "@types/node": "^22.15.0",
     "typescript": "^5.8.3"
+  },
+
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oamilkar/bluesurf-mcp-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oamilkar/bluesurf-mcp-node/issues"
+  },
+  "homepage": "https://github.com/oamilkar/bluesurf-mcp-node#readme",
+  "publishConfig": {
+    "access": "public"
   }
 }
