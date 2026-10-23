@@ -1,0 +1,37 @@
+# Dependencias
+node_modules/
+
+# Salida de tsc (tsconfig.json / tsconfig.test.json)
+dist/
+dist-test/
+*.tsbuildinfo
+
+# Logs y cobertura
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+coverage/
+.nyc_output/
+
+# Secretos (el servidor guarda credenciales de BlueSurf)
+.env
+.env.*
+*.env
+secrets.*
+*.secret
+cookies.txt
+*.cookies
+session.json
+credentials.json
+config.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

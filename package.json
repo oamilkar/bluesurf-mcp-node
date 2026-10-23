@@ -1,0 +1,35 @@
+{
+  "name": "@bluepeople/bluesurf-mcp",
+  "version": "0.2.0",
+  "description": "Servidor MCP local para leer tickets de BlueSurf",
+  "type": "module",
+  "license": "MIT",
+  "author": "oamilkar",
+  "keywords": ["bluesurf", "mcp", "tickets"],
+  "bin": {
+    "bluesurf-mcp": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.2",
+    "@napi-rs/keyring": "^1.1.6",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}
