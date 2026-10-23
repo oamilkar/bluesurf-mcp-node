@@ -38,6 +38,12 @@ La contraseña no va en `mcp.json`. Una vez, en una terminal:
 bluesurf-mcp login
 ```
 
+Si no instalaste el paquete de forma global, el mismo login corre con `npx`:
+
+```bash
+npx -y bluesurf-mcp login
+```
+
 Pide usuario y contraseña, valida contra BlueSurf y guarda la contraseña en el
 almacén del sistema (Credential Manager en Windows, Keychain en macOS, Secret
 Service en Linux). El username queda en un JSON local, sin la contraseña.
@@ -105,6 +111,12 @@ Con el paquete instalado de forma global:
 ```
 
 `-y` evita la pregunta de confirmación de npx. Las variables `BLUESURF_*` en `env` siguen siendo válidas como override.
+
+Esa configuración no pide la contraseña. Antes de usarla, guárdala una vez; Cursor reutiliza lo que quede en el almacén del sistema:
+
+```bash
+npx -y bluesurf-mcp login
+```
 
 ## Tools expuestas (solo lectura)
 
