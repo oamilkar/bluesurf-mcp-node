@@ -12,7 +12,7 @@
     "tickets"
   ],
   "bin": {
-    "bluesurf-mcp": "./dist/bin.js"
+    "bluesurf-mcp": "dist/bin.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -44,7 +44,6 @@
     "@types/node": "^22.15.0",
     "typescript": "^5.8.3"
   },
-
   "repository": {
     "type": "git",
     "url": "git+https://github.com/oamilkar/bluesurf-mcp-node.git"
