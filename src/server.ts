@@ -1,8 +1,9 @@
-/** Servidor MCP local para leer tickets de BlueSurf.
+/** Servidor MCP local para tickets de BlueSurf.
 
-Adaptador delgado: solo tools de lectura. La cookie de sesión vive en memoria
-mientras corre el proceso. La contraseña, si hace falta, sale del almacén del
-sistema (servicio `bluesurf-mcp-node`) o de las variables de entorno.
+Adaptador delgado: lee tickets y, además, adjunta un archivo y publica un
+comentario. La cookie de sesión vive en memoria mientras corre el proceso.
+La contraseña, si hace falta, sale del almacén del sistema (servicio
+`bluesurf-mcp-node`) o de las variables de entorno.
 */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -18,6 +19,7 @@ import { envValue } from "./env.js";
 import {
   ticketToDict,
   type Attachment,
+  type Comment,
   type DownloadedFile,
   type Ticket,
 } from "./models.js";
@@ -35,6 +37,8 @@ export interface SurfClient {
     destino?: string | null,
     options?: { archivoId?: string | null },
   ): Promise<DownloadedFile[]>;
+  adjuntarArchivo(code: string, ruta: string): Promise<Attachment>;
+  agregarComentario(code: string, texto: string): Promise<Comment>;
   aclose(): Promise<void>;
 }
 
@@ -160,6 +164,40 @@ export async function descargarAdjuntos(
   });
 }
 
+export async function adjuntarArchivo(
+  code: string,
+  ruta: string,
+): Promise<{ id: string; name: string | null; is_image: boolean }> {
+  return usingClient(async (client) => {
+    const adjunto = await client.adjuntarArchivo(code, ruta);
+    return {
+      id: adjunto.id,
+      name: adjunto.name,
+      is_image: adjunto.is_image,
+    };
+  });
+}
+
+export async function agregarComentario(
+  code: string,
+  texto: string,
+): Promise<{
+  id: string;
+  author: string | null;
+  body: string | null;
+  created_at: string | null;
+}> {
+  return usingClient(async (client) => {
+    const comentario = await client.agregarComentario(code, texto);
+    return {
+      id: comentario.id,
+      author: comentario.author,
+      body: comentario.body,
+      created_at: comentario.created_at,
+    };
+  });
+}
+
 function jsonText(data: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -167,7 +205,7 @@ function jsonText(data: unknown) {
 }
 
 export function createMcpServer(): McpServer {
-  const server = new McpServer({ name: "bluesurf", version: "0.2.0" });
+  const server = new McpServer({ name: "bluesurf", version: "0.3.0" });
   const readOnly = { readOnlyHint: true };
 
   server.registerTool(
@@ -251,6 +289,36 @@ export function createMcpServer(): McpServer {
     },
     async ({ code, destino, archivo_id }) =>
       jsonText(await descargarAdjuntos(code, destino, archivo_id)),
+  );
+
+  const writes = { readOnlyHint: false, destructiveHint: false };
+
+  server.registerTool(
+    "adjuntar_archivo",
+    {
+      description:
+        "Adjunta un archivo local a un ticket de BlueSurf. Se sube solo el nombre, sin directorios.",
+      inputSchema: {
+        code: z.string().describe("Código del ticket, por ejemplo PROJ-123."),
+        ruta: z.string().describe("Ruta local del archivo a subir."),
+      },
+      annotations: writes,
+    },
+    async ({ code, ruta }) => jsonText(await adjuntarArchivo(code, ruta)),
+  );
+
+  server.registerTool(
+    "agregar_comentario",
+    {
+      description:
+        "Publica un comentario en un ticket de BlueSurf. El texto se escapa y se envuelve en un párrafo HTML.",
+      inputSchema: {
+        code: z.string().describe("Código del ticket, por ejemplo PROJ-123."),
+        texto: z.string().describe("Comentario en texto plano."),
+      },
+      annotations: writes,
+    },
+    async ({ code, texto }) => jsonText(await agregarComentario(code, texto)),
   );
 
   return server;

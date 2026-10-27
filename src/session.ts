@@ -1,4 +1,8 @@
-/** Sesión HTTP de solo lectura: cookie en memoria y un reintento ante 401. */
+/** Sesión HTTP: cookie en memoria y un reintento ante 401.
+
+Las lecturas usan GET (y un POST de filtro para el kanban). Adjuntar un
+archivo y publicar un comentario usan `postMultipart`.
+*/
 
 import type { AuthProvider, PublicRequest } from "./auth.js";
 import { AuthError } from "./auth.js";
@@ -87,6 +91,32 @@ export class BlueSurfSession {
     return { content, contentType, headers: headerMap };
   }
 
+  /** POST multipart. `build` se llama en cada intento, incluido el reintento ante un 401. */
+  async postMultipart(path: string, build: () => FormData): Promise<unknown> {
+    if (this.#auth === null) {
+      throw new AuthError(
+        "La sesión no está autenticada: llama a login() primero",
+      );
+    }
+
+    let response = await this.#send("POST", path, { body: build() });
+    if (response.status === 401) {
+      await this.#auth.refresh(this);
+      response = await this.#send("POST", path, { body: build() });
+    }
+    if (response.status === 401) {
+      throw new AuthError(
+        "BlueSurf sigue devolviendo 401 tras renovar la sesión",
+      );
+    }
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} en POST ${path}`,
+      );
+    }
+    return response.json() as Promise<unknown>;
+  }
+
   async requestPublic(
     method: string,
     path: string,
@@ -134,8 +164,10 @@ export class BlueSurfSession {
     const cookie = this.#cookieHeader();
     if (cookie) headers.set("Cookie", cookie);
 
-    let body: string | undefined;
-    if (options?.json !== undefined) {
+    let body: string | FormData | undefined;
+    if (options?.body !== undefined) {
+      body = options.body;
+    } else if (options?.json !== undefined) {
       headers.set("Content-Type", "application/json");
       body = JSON.stringify(options.json);
     }

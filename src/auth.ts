@@ -17,6 +17,8 @@ export interface PublicRequest {
   json?: unknown;
   params?: Record<string, string>;
   headers?: Headers | Record<string, string>;
+  /** Cuerpo multipart. No se serializa a JSON ni se le fija Content-Type. */
+  body?: FormData;
 }
 
 /** Superficie que un AuthProvider necesita del cliente HTTP. */

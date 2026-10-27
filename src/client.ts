@@ -1,22 +1,24 @@
-/** Cliente de solo lectura de BlueSurf.
+/** Cliente de BlueSurf.
 
 Expone los tickets asignados al usuario. No hay endpoint "asignados a mí":
 se consulta el kanban del proyecto con el filtro `assignedTo` en el id del
-usuario actual. No hay operaciones de escritura.
+usuario actual. También adjunta un archivo y publica un comentario.
 */
 
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { AuthProvider } from "./auth.js";
 import { IDENTITY_COOKIE } from "./constants.js";
 import {
   attachmentFromJson,
+  commentsOf,
   isRecord,
   ticketFromJson,
   userFromCurrentUser,
   type Attachment,
+  type Comment,
   type DownloadedFile,
   type Ticket,
   type User,
@@ -34,6 +36,8 @@ const PATH_WORKITEM = "/api/workItem/{code}";
 const PATH_FILE_NAME = "/api/workItem/{work_item_id}/fileName/{file_id}";
 const PATH_FILE = "/api/workItem/{work_item_id}/file/{file_id}";
 const PATH_IMAGE = "/api/workItem/{work_item_id}/image/{file_id}";
+const PATH_UPLOAD = "/api/workItem/{work_item_id}/file";
+const PATH_COMMENT = "/api/WorkItem/{work_item_id}/comment";
 
 export interface ClientOptions {
   baseUrl?: string;
@@ -179,6 +183,50 @@ export class BlueSurfClient {
     return descargados;
   }
 
+  /** Sube un archivo local. El POST va al id del work item, no al código. */
+  async adjuntarArchivo(code: string, ruta: string): Promise<Attachment> {
+    const ticket = await this.obtenerTicket(code);
+    if (!ticket.id) throw new Error(`El ticket ${code} no tiene id`);
+    const previos = idsDeArchivos(ticket);
+    const contenido = await leerArchivo(ruta);
+    const nombre = nombreSeguro(path.basename(ruta), path.basename(ruta));
+    const tipo = contentTypeFor(nombre);
+    const data = await this.#session.postMultipart(
+      fill(PATH_UPLOAD, { work_item_id: ticket.id }),
+      () => {
+        const form = new FormData();
+        form.append("file", new Blob([contenido], { type: tipo }), nombre);
+        return form;
+      },
+    );
+    return adjuntoNuevo(data, previos, nombre, ticket.id);
+  }
+
+  /** Publica un comentario. El texto se escapa y se envuelve en `<p>`. */
+  async agregarComentario(code: string, texto: string): Promise<Comment> {
+    const limpio = texto.trim();
+    if (!limpio) throw new Error("El comentario está vacío");
+    const ticket = await this.obtenerTicket(code);
+    if (!ticket.id) throw new Error(`El ticket ${code} no tiene id`);
+    const previos = new Set(
+      commentsOf(ticket)
+        .map((item) => item.id)
+        .filter((id) => id),
+    );
+    const payload = JSON.stringify({
+      comment: `<p>${escapeHtml(limpio)}</p>`,
+    });
+    const data = await this.#session.postMultipart(
+      fill(PATH_COMMENT, { work_item_id: ticket.id }),
+      () => {
+        const form = new FormData();
+        form.append("comment", payload);
+        return form;
+      },
+    );
+    return comentarioNuevo(data, previos);
+  }
+
   async #nombreAdjunto(
     workItemId: string,
     fileId: string,
@@ -214,6 +262,106 @@ export class BlueSurfClient {
       path: ruta,
     };
   }
+}
+
+async function leerArchivo(ruta: string): Promise<Buffer> {
+  try {
+    return await readFile(ruta);
+  } catch (error) {
+    if (isEnoent(error)) throw new Error(`No existe el archivo ${ruta}`);
+    throw error;
+  }
+}
+
+function isEnoent(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
+function idsDeArchivos(ticket: Ticket): Set<string> {
+  const files = ticket.raw.files;
+  const ids = new Set<string>();
+  if (!Array.isArray(files)) return ids;
+  for (const raw of files) {
+    if (isRecord(raw) && raw.id != null && String(raw.id)) {
+      ids.add(String(raw.id));
+    }
+  }
+  return ids;
+}
+
+function adjuntoNuevo(
+  data: unknown,
+  previos: Set<string>,
+  nombre: string,
+  workItemId: string,
+): Attachment {
+  const ticket = ticketDeRespuesta(data);
+  const files = ticket.raw.files;
+  const nuevos: Attachment[] = [];
+  if (Array.isArray(files)) {
+    for (const raw of files) {
+      if (!isRecord(raw)) continue;
+      const adjunto = attachmentFromJson(raw);
+      if (!adjunto.id || previos.has(adjunto.id)) continue;
+      if (!adjunto.name) adjunto.name = nombre;
+      if (!adjunto.work_item_id) adjunto.work_item_id = workItemId;
+      nuevos.push(adjunto);
+    }
+  }
+  const nuevo = nuevos.at(-1);
+  if (!nuevo) throw new Error("BlueSurf no devolvió el archivo nuevo");
+  return nuevo;
+}
+
+function comentarioNuevo(data: unknown, previos: Set<string>): Comment {
+  const nuevos = commentsOf(ticketDeRespuesta(data)).filter(
+    (item) => item.id && !previos.has(item.id),
+  );
+  const nuevo = nuevos.at(-1);
+  if (!nuevo) throw new Error("BlueSurf no devolvió el comentario nuevo");
+  return nuevo;
+}
+
+function ticketDeRespuesta(data: unknown): Ticket {
+  if (!isRecord(data)) throw new Error("BlueSurf no devolvió el work item");
+  return ticketFromJson(data);
+}
+
+/** Misma sustitución que `html.escape` de Python. */
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#x27;");
+}
+
+const MIME_POR_EXTENSION: Record<string, string> = {
+  ".html": "text/html",
+  ".htm": "text/html",
+  ".txt": "text/plain",
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".json": "application/json",
+  ".csv": "text/csv",
+  ".xml": "application/xml",
+  ".zip": "application/zip",
+};
+
+function contentTypeFor(filename: string): string {
+  return (
+    MIME_POR_EXTENSION[path.extname(filename).toLowerCase()] ??
+    "application/octet-stream"
+  );
 }
 
 function kanbanFilter(userId: string): Record<string, unknown> {

@@ -1,4 +1,4 @@
-/** Fachada pública del núcleo de solo lectura. */
+/** Fachada pública del núcleo. */
 export { BlueSurfClient } from "./client.js";
 export { AuthError, CookieAuth, CredentialsAuth } from "./auth.js";
 export type { AuthProvider } from "./auth.js";

@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 
-import type { Attachment, DownloadedFile } from "../src/models.js";
+import type { Attachment, Comment, DownloadedFile } from "../src/models.js";
 import {
+  agregarComentario,
+  adjuntarArchivo,
   buscarMisTickets,
   descargarAdjuntos,
   listarAdjuntos,
@@ -121,5 +123,58 @@ describe("tools MCP", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("adjuntar_archivo devuelve el archivo nuevo", async () => {
+    setClientFactory(async () => {
+      const fake: Partial<SurfClient> = {
+        async adjuntarArchivo(code, ruta) {
+          assert.equal(code, "PROJ-1");
+          assert.equal(ruta, "C:/tmp/nota.txt");
+          const adjunto: Attachment = {
+            id: "doc-2",
+            work_item_id: "wi-1",
+            name: "nota.txt",
+            is_image: false,
+            raw: {},
+          };
+          return adjunto;
+        },
+        async aclose() {},
+      };
+      return fake as SurfClient;
+    });
+    assert.deepEqual(await adjuntarArchivo("PROJ-1", "C:/tmp/nota.txt"), {
+      id: "doc-2",
+      name: "nota.txt",
+      is_image: false,
+    });
+  });
+
+  it("agregar_comentario devuelve el comentario nuevo", async () => {
+    setClientFactory(async () => {
+      const fake: Partial<SurfClient> = {
+        async agregarComentario(code, texto) {
+          assert.equal(code, "PROJ-1");
+          assert.equal(texto, "hola");
+          const comentario: Comment = {
+            id: "c-new",
+            author: "Ana",
+            body: "<p>hola</p>",
+            created_at: "2026-10-27T00:00:00",
+            raw: {},
+          };
+          return comentario;
+        },
+        async aclose() {},
+      };
+      return fake as SurfClient;
+    });
+    assert.deepEqual(await agregarComentario("PROJ-1", "hola"), {
+      id: "c-new",
+      author: "Ana",
+      body: "<p>hola</p>",
+      created_at: "2026-10-27T00:00:00",
+    });
   });
 });

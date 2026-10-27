@@ -1,11 +1,11 @@
 # bluesurf-mcp (Node.js)
 
-Servidor MCP local de **solo lectura** para que Cursor u otros agentes lean
-tickets de **BlueSurf**. 
+Servidor MCP local para que Cursor u otros agentes lean tickets de **BlueSurf**,
+adjunten un archivo y publiquen un comentario.
 El CLI es `login`, `logout`, y sin argumentos el servidor por stdio.
 
-**Solo lectura por diseño:** no hay operaciones de escritura. El kanban se
-consulta con un POST de filtro.
+El kanban se consulta con un POST de filtro. Las escrituras son
+`adjuntar_archivo` y `agregar_comentario`.
 
 Hace falta **Node.js 20 o superior**.
 
@@ -118,13 +118,15 @@ Esa configuración no pide la contraseña. Antes de usarla, guárdala una vez; C
 npx -y bluesurf-mcp login
 ```
 
-## Tools expuestas (solo lectura)
+## Tools expuestas
 
 - `mis_proyectos` — proyectos del usuario (id, smallCode, code, name).
 - `buscar_mis_tickets(project, include_closed=false)` — tickets asignados al usuario.
 - `obtener_ticket(code)` — detalle de un ticket por su código (p. ej. `PROJ-123`).
 - `listar_adjuntos(code)` — archivos de la sección Files del ticket (id, name, is_image), sin descargarlos.
 - `descargar_adjuntos(code, destino, archivo_id)` — guarda esos archivos en `destino`. Con `archivo_id` descarga solo uno; si no, todos. Devuelve id, name, path, content_type y size.
+- `adjuntar_archivo(code, ruta)` — sube un archivo local a la sección Files. Devuelve id, name e is_image del archivo nuevo.
+- `agregar_comentario(code, texto)` — publica un comentario. El texto se escapa y se envuelve en un párrafo HTML. Devuelve id, author, body y created_at.
 
 ## Usar el cliente desde Node
 
