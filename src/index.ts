@@ -6,8 +6,13 @@ export { DEFAULT_BASE_URL } from "./constants.js";
 export { commentsOf } from "./models.js";
 export type {
   Attachment,
+  CategoriaReporte,
   Comment,
   DownloadedFile,
+  EsfuerzoDiario,
+  ProyectoReporte,
+  ReporteDiario,
   Ticket,
   User,
 } from "./models.js";
+export type { LineaTiempoInput, RegistrarTiempoInput } from "./client.js";

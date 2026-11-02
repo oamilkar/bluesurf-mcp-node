@@ -1,7 +1,8 @@
 /** Servidor MCP local para tickets de BlueSurf.
 
-Adaptador delgado: lee tickets y, además, adjunta un archivo y publica un
-comentario. La cookie de sesión vive en memoria mientras corre el proceso.
+Adaptador delgado: lee tickets, adjunta un archivo, publica un comentario
+y registra tiempo en el daily report. La cookie de sesión vive en memoria
+mientras corre el proceso.
 La contraseña, si hace falta, sale del almacén del sistema (servicio
 `bluesurf-mcp-node`) o de las variables de entorno.
 */
@@ -16,11 +17,16 @@ import { BlueSurfClient } from "./client.js";
 import { DEFAULT_BASE_URL } from "./constants.js";
 import { loadStored } from "./credentials-store.js";
 import { envValue } from "./env.js";
+import type { RegistrarTiempoInput } from "./client.js";
 import {
+  reporteToDict,
   ticketToDict,
   type Attachment,
+  type CategoriaReporte,
   type Comment,
   type DownloadedFile,
+  type ProyectoReporte,
+  type ReporteDiario,
   type Ticket,
 } from "./models.js";
 
@@ -39,6 +45,10 @@ export interface SurfClient {
   ): Promise<DownloadedFile[]>;
   adjuntarArchivo(code: string, ruta: string): Promise<Attachment>;
   agregarComentario(code: string, texto: string): Promise<Comment>;
+  proyectosReporte(): Promise<ProyectoReporte[]>;
+  listarCategorias(proyecto?: string | null): Promise<CategoriaReporte[]>;
+  miReporteDiario(fecha: string): Promise<ReporteDiario>;
+  registrarTiempo(input: RegistrarTiempoInput): Promise<ReporteDiario>;
   aclose(): Promise<void>;
 }
 
@@ -198,6 +208,62 @@ export async function agregarComentario(
   });
 }
 
+export async function proyectosReporte(): Promise<
+  Array<{
+    id: string | null;
+    smallCode: string | null;
+    code: string | null;
+    name: string | null;
+    categoryIds: string[];
+  }>
+> {
+  return usingClient(async (client) => {
+    const proyectos = await client.proyectosReporte();
+    return proyectos.map((project) => ({
+      id: project.id,
+      smallCode: project.smallCode,
+      code: project.code,
+      name: project.name,
+      categoryIds: project.categoryIds,
+    }));
+  });
+}
+
+export async function listarCategorias(proyecto?: string | null): Promise<
+  Array<{
+    id: string;
+    name: string | null;
+    categoryId: string | null;
+    categoryName: string | null;
+  }>
+> {
+  return usingClient(async (client) => {
+    const categorias = await client.listarCategorias(proyecto);
+    return categorias.map((categoria) => ({
+      id: categoria.id,
+      name: categoria.name,
+      categoryId: categoria.categoryId,
+      categoryName: categoria.categoryName,
+    }));
+  });
+}
+
+export async function miReporteDiario(
+  fecha: string,
+): Promise<Record<string, unknown>> {
+  return usingClient(async (client) =>
+    reporteToDict(await client.miReporteDiario(fecha)),
+  );
+}
+
+export async function registrarTiempo(
+  input: RegistrarTiempoInput,
+): Promise<Record<string, unknown>> {
+  return usingClient(async (client) =>
+    reporteToDict(await client.registrarTiempo(input)),
+  );
+}
+
 function jsonText(data: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -205,7 +271,7 @@ function jsonText(data: unknown) {
 }
 
 export function createMcpServer(): McpServer {
-  const server = new McpServer({ name: "bluesurf", version: "0.3.0" });
+  const server = new McpServer({ name: "bluesurf", version: "0.4.0" });
   const readOnly = { readOnlyHint: true };
 
   server.registerTool(
@@ -319,6 +385,110 @@ export function createMcpServer(): McpServer {
       annotations: writes,
     },
     async ({ code, texto }) => jsonText(await agregarComentario(code, texto)),
+  );
+
+  server.registerTool(
+    "proyectos_reporte",
+    {
+      description:
+        "Lista los proyectos activos en los que se puede registrar tiempo (id, smallCode, code, name, categoryIds). El smallCode se pasa a registrar_tiempo. Omitir el proyecto registra tiempo sin proyecto.",
+      annotations: readOnly,
+    },
+    async () => jsonText(await proyectosReporte()),
+  );
+
+  server.registerTool(
+    "listar_categorias",
+    {
+      description:
+        'Subcategorías para una línea de tiempo. Con proyecto (smallCode) solo las de ese proyecto. registrar_tiempo acepta el nombre o "Categoria: Nombre" y lo resuelve contra el catálogo completo.',
+      inputSchema: {
+        proyecto: z
+          .string()
+          .optional()
+          .describe(
+            'smallCode del proyecto. Si se omite, devuelve todas las subcategorías del usuario.',
+          ),
+      },
+      annotations: readOnly,
+    },
+    async ({ proyecto }) => jsonText(await listarCategorias(proyecto)),
+  );
+
+  server.registerTool(
+    "mi_reporte_diario",
+    {
+      description:
+        "Devuelve el daily report de un día. cerrado es true cuando status es 2 y ese día ya no se puede editar.",
+      inputSchema: {
+        fecha: z.string().describe("Día en formato YYYY-MM-DD."),
+      },
+      annotations: readOnly,
+    },
+    async ({ fecha }) => jsonText(await miReporteDiario(fecha)),
+  );
+
+  server.registerTool(
+    "registrar_tiempo",
+    {
+      description:
+        "Agrega una o más líneas al daily report y reenvía el día completo en un solo guardado, sin borrar las líneas que ya estaban. Si el día está cerrado o alguna línea es inválida, no escribe. Sin ticket la descripción es obligatoria. Con ticket (código PROJ-123) el tiempo queda ligado a ese work item y el proyecto sale del ticket. confirmar en true cierra el día (status 2); por defecto guarda un borrador.",
+      inputSchema: {
+        fecha: z.string().describe("Día en formato YYYY-MM-DD."),
+        lineas: z
+          .array(
+            z.object({
+              horas: z
+                .number()
+                .describe("Horas en decimal. 1.25 son 1 h 15 min. Mayor o igual a 0."),
+              categoria: z
+                .string()
+                .describe(
+                  'Nombre de la subcategoría, o "Categoria: Nombre" si el nombre está repetido.',
+                ),
+              descripcion: z
+                .string()
+                .optional()
+                .describe("Texto de la línea. Obligatorio si no hay ticket."),
+              proyecto: z
+                .string()
+                .optional()
+                .describe(
+                  "smallCode del proyecto. Vacío registra tiempo sin proyecto. Si hay ticket, tiene que ser el proyecto de ese ticket.",
+                ),
+              ticket: z
+                .string()
+                .optional()
+                .describe(
+                  "Código del work item, por ejemplo PROJ-123. Liga la línea a esa tarea.",
+                ),
+              pendiente: z
+                .number()
+                .optional()
+                .describe(
+                  "Horas pendientes de la tarea. Solo con ticket; si se omite queda en 0.",
+                ),
+            }),
+          )
+          .min(1)
+          .describe("Líneas que se agregan al día. Una sola línea es un arreglo de un elemento."),
+        confirmar: z
+          .boolean()
+          .optional()
+          .describe(
+            "Si es true cierra el día (status 2). Por defecto guarda un borrador (status 0).",
+          ),
+      },
+      annotations: writes,
+    },
+    async ({ fecha, lineas, confirmar }) =>
+      jsonText(
+        await registrarTiempo({
+          fecha,
+          lineas,
+          confirmar: confirmar ?? false,
+        }),
+      ),
   );
 
   return server;

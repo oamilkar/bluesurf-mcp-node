@@ -1,11 +1,11 @@
 # bluesurf-mcp (Node.js)
 
 Servidor MCP local para que Cursor u otros agentes lean tickets de **BlueSurf**,
-adjunten un archivo y publiquen un comentario.
+adjunten un archivo, publiquen un comentario y registren tiempo en el daily report.
 El CLI es `login`, `logout`, y sin argumentos el servidor por stdio.
 
 El kanban se consulta con un POST de filtro. Las escrituras son
-`adjuntar_archivo` y `agregar_comentario`.
+`adjuntar_archivo`, `agregar_comentario` y `registrar_tiempo`.
 
 Hace falta **Node.js 20 o superior**.
 
@@ -127,6 +127,10 @@ npx -y bluesurf-mcp login
 - `descargar_adjuntos(code, destino, archivo_id)` — guarda esos archivos en `destino`. Con `archivo_id` descarga solo uno; si no, todos. Devuelve id, name, path, content_type y size.
 - `adjuntar_archivo(code, ruta)` — sube un archivo local a la sección Files. Devuelve id, name e is_image del archivo nuevo.
 - `agregar_comentario(code, texto)` — publica un comentario. El texto se escapa y se envuelve en un párrafo HTML. Devuelve id, author, body y created_at.
+- `proyectos_reporte` — proyectos activos para registrar tiempo (id, smallCode, code, name, categoryIds).
+- `listar_categorias(proyecto)` — subcategorías del usuario. Con `proyecto` (smallCode) solo las de ese proyecto.
+- `mi_reporte_diario(fecha)` — daily report de un día (`YYYY-MM-DD`). `cerrado` es true cuando `status` es 2.
+- `registrar_tiempo(fecha, lineas, confirmar)` — agrega una o más líneas y reenvía el día en un solo guardado. Cada línea lleva `horas`, `categoria` y, si aplica, `descripcion`, `proyecto`, `ticket` y `pendiente`. Sin ticket la descripción es obligatoria. `confirmar` cierra el día; por defecto guarda un borrador.
 
 ## Usar el cliente desde Node
 

@@ -1,7 +1,8 @@
 /** Sesión HTTP: cookie en memoria y un reintento ante 401.
 
-Las lecturas usan GET (y un POST de filtro para el kanban). Adjuntar un
-archivo y publicar un comentario usan `postMultipart`.
+Las lecturas usan GET (y un POST de filtro para el kanban). Guardar el daily
+report usa `postJson`. Adjuntar un archivo y publicar un comentario usan
+`postMultipart`.
 */
 
 import type { AuthProvider, PublicRequest } from "./auth.js";
@@ -76,6 +77,18 @@ export class BlueSurfSession {
   ): Promise<unknown> {
     const response = await this.#request("POST", path, { ...options, json });
     return response.json() as Promise<unknown>;
+  }
+
+  /** POST JSON. Un cuerpo de respuesta vacío devuelve `null`. */
+  async postJson(
+    path: string,
+    json: unknown,
+    options?: PublicRequest,
+  ): Promise<unknown> {
+    const response = await this.#request("POST", path, { ...options, json });
+    const text = await response.text();
+    if (!text.trim()) return null;
+    return JSON.parse(text) as unknown;
   }
 
   async getBytes(path: string, options?: PublicRequest): Promise<BinaryBody> {

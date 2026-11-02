@@ -38,6 +38,44 @@ export interface DownloadedFile {
   path: string | null;
 }
 
+export interface ProyectoReporte {
+  id: string | null;
+  smallCode: string | null;
+  code: string | null;
+  name: string | null;
+  categoryIds: string[];
+}
+
+export interface CategoriaReporte {
+  id: string;
+  name: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+}
+
+export interface EsfuerzoDiario {
+  id: string | null;
+  description: string | null;
+  executed: number | null;
+  pending: number | null;
+  projectId: string | null;
+  workItemId: string | null;
+  taskId: string | null;
+  categoryId: string | null;
+  subcategoryId: string | null;
+}
+
+export interface ReporteDiario {
+  id: string;
+  fecha: string;
+  status: number;
+  cerrado: boolean;
+  executedHours: number;
+  efforts: EsfuerzoDiario[];
+  /** Documento del GET, para reenviar el día completo. */
+  raw: Record<string, unknown>;
+}
+
 export interface Ticket {
   id: string;
   code: string | null;
@@ -143,6 +181,93 @@ export function attachmentFromJson(data: Record<string, unknown>): Attachment {
     name: asString(data.name),
     is_image: Boolean(data.isImage ?? false),
     raw: data,
+  };
+}
+
+export function proyectoReporteFromJson(
+  data: Record<string, unknown>,
+): ProyectoReporte {
+  const categories = Array.isArray(data.categories) ? data.categories : [];
+  const categoryIds: string[] = [];
+  for (const category of categories) {
+    if (!isRecord(category)) continue;
+    const categoryId = asString(category.categoryId);
+    if (categoryId) categoryIds.push(categoryId);
+  }
+  return {
+    id: asString(data.id),
+    smallCode: asString(data.smallCode),
+    code: asString(data.code),
+    name: asString(data.name),
+    categoryIds,
+  };
+}
+
+export function categoriaReporteFromJson(
+  data: Record<string, unknown>,
+): CategoriaReporte {
+  return {
+    id: asId(data.id),
+    name: asString(data.name),
+    categoryId: asString(data.categoryId),
+    categoryName: asString(data.categoryName),
+  };
+}
+
+export function esfuerzoDiarioFromJson(
+  data: Record<string, unknown>,
+): EsfuerzoDiario {
+  return {
+    id: asString(data.id),
+    description: asString(data.description),
+    executed: asNumber(data.executed),
+    pending: asNumber(data.pending),
+    projectId: asString(data.projectId),
+    workItemId: asString(data.workItemId),
+    taskId: asString(data.taskId),
+    categoryId: asString(data.categoryId),
+    subcategoryId: asString(data.subcategoryId),
+  };
+}
+
+export function reporteDiarioFromJson(
+  data: Record<string, unknown>,
+  fecha: string,
+): ReporteDiario {
+  const date = asString(data.date);
+  const status = asNumber(data.status) ?? 0;
+  const efforts = Array.isArray(data.efforts) ? data.efforts : [];
+  return {
+    id: asId(data.id),
+    fecha: date && date.length >= 10 ? date.slice(0, 10) : fecha,
+    status,
+    cerrado: status === 2,
+    executedHours: asNumber(data.executedHours) ?? 0,
+    efforts: efforts.filter(isRecord).map(esfuerzoDiarioFromJson),
+    raw: data,
+  };
+}
+
+export function reporteToDict(
+  reporte: ReporteDiario,
+): Record<string, unknown> {
+  return {
+    id: reporte.id,
+    fecha: reporte.fecha,
+    status: reporte.status,
+    cerrado: reporte.cerrado,
+    executedHours: reporte.executedHours,
+    efforts: reporte.efforts.map((effort) => ({
+      id: effort.id,
+      description: effort.description,
+      executed: effort.executed,
+      pending: effort.pending,
+      projectId: effort.projectId,
+      workItemId: effort.workItemId,
+      taskId: effort.taskId,
+      categoryId: effort.categoryId,
+      subcategoryId: effort.subcategoryId,
+    })),
   };
 }
 

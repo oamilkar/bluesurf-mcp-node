@@ -2,7 +2,8 @@
 
 Expone los tickets asignados al usuario. No hay endpoint "asignados a mí":
 se consulta el kanban del proyecto con el filtro `assignedTo` en el id del
-usuario actual. También adjunta un archivo y publica un comentario.
+usuario actual. También adjunta un archivo, publica un comentario y registra
+tiempo en el daily report.
 */
 
 import { existsSync } from "node:fs";
@@ -13,13 +14,19 @@ import type { AuthProvider } from "./auth.js";
 import { IDENTITY_COOKIE } from "./constants.js";
 import {
   attachmentFromJson,
+  categoriaReporteFromJson,
   commentsOf,
   isRecord,
+  proyectoReporteFromJson,
+  reporteDiarioFromJson,
   ticketFromJson,
   userFromCurrentUser,
   type Attachment,
+  type CategoriaReporte,
   type Comment,
   type DownloadedFile,
+  type ProyectoReporte,
+  type ReporteDiario,
   type Ticket,
   type User,
 } from "./models.js";
@@ -38,6 +45,34 @@ const PATH_FILE = "/api/workItem/{work_item_id}/file/{file_id}";
 const PATH_IMAGE = "/api/workItem/{work_item_id}/image/{file_id}";
 const PATH_UPLOAD = "/api/workItem/{work_item_id}/file";
 const PATH_COMMENT = "/api/WorkItem/{work_item_id}/comment";
+const PATH_PROJECTS = "/api/project";
+const PATH_SUBCATEGORIES = "/api/user/current/subcategory";
+const PATH_DAILY_REPORT = "/api/effort/myDailyReport/{fecha}";
+const PATH_SAVE_DAILY_REPORT = "/api/Effort/DailyReport";
+
+export interface LineaTiempoInput {
+  horas: number;
+  categoria: string;
+  descripcion?: string | null;
+  proyecto?: string | null;
+  ticket?: string | null;
+  pendiente?: number | null;
+}
+
+export interface RegistrarTiempoInput {
+  fecha: string;
+  lineas: LineaTiempoInput[];
+  confirmar?: boolean;
+}
+
+interface LineaPreparada {
+  executed: number;
+  descripcion: string | null;
+  proyecto: string | null;
+  ticket: string | null;
+  pending: number | null;
+  categoria: string;
+}
 
 export interface ClientOptions {
   baseUrl?: string;
@@ -225,6 +260,143 @@ export class BlueSurfClient {
       },
     );
     return comentarioNuevo(data, previos);
+  }
+
+  /** Proyectos activos para registrar tiempo, con las categorías de cada uno. */
+  async proyectosReporte(): Promise<ProyectoReporte[]> {
+    const data = await this.#session.getJson(PATH_PROJECTS, {
+      params: { includeCategories: "true" },
+    });
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter(isRecord)
+      .filter((project) => project.status === 1)
+      .map(proyectoReporteFromJson);
+  }
+
+  /**
+   * Subcategorías del usuario. Con `proyecto` (smallCode) solo las de ese
+   * proyecto. `registrarTiempo` resuelve el nombre contra el catálogo completo.
+   */
+  async listarCategorias(proyecto?: string | null): Promise<CategoriaReporte[]> {
+    const catalogo = await this.#catalogoCategorias();
+    const codigo = textoOpcional(proyecto);
+    if (!codigo) return catalogo;
+    const project = buscarProyecto(await this.proyectosReporte(), codigo);
+    const permitidas = new Set(project.categoryIds);
+    return catalogo.filter(
+      (categoria) =>
+        categoria.categoryId !== null && permitidas.has(categoria.categoryId),
+    );
+  }
+
+  /** Daily report de un día. `cerrado` es true cuando `status` es 2. */
+  async miReporteDiario(fecha: string): Promise<ReporteDiario> {
+    const dia = exigirFecha(fecha);
+    const data = await this.#session.getJson(fill(PATH_DAILY_REPORT, { fecha: dia }));
+    if (!isRecord(data)) {
+      throw new Error(`El reporte del ${dia} no es un objeto`);
+    }
+    return reporteDiarioFromJson(data, dia);
+  }
+
+  /**
+   * Agrega una o más líneas al daily report y reenvía el día en un solo POST.
+   * Si el día ya está cerrado, o alguna línea es inválida, no escribe.
+   */
+  async registrarTiempo(input: RegistrarTiempoInput): Promise<ReporteDiario> {
+    const fecha = exigirFecha(input.fecha);
+    const lineas = input.lineas ?? [];
+    if (lineas.length === 0) {
+      throw new Error("Hay que indicar al menos una línea");
+    }
+    const preparadas = lineas.map(prepararLinea);
+
+    const reporte = await this.miReporteDiario(fecha);
+    if (reporte.cerrado) {
+      throw new Error(`El reporte del ${fecha} ya está cerrado`);
+    }
+
+    const catalogo = await this.#catalogoCategorias();
+    const proyectos = preparadas.some((linea) => linea.proyecto)
+      ? await this.proyectosReporte()
+      : null;
+    const resueltas = [];
+    for (let indice = 0; indice < preparadas.length; indice += 1) {
+      try {
+        resueltas.push(
+          await this.#resolverLinea(preparadas[indice], catalogo, proyectos),
+        );
+      } catch (error) {
+        throw errorDeLinea(indice, error);
+      }
+    }
+
+    if (!isRecord(reporte.raw)) {
+      throw new Error(`El reporte del ${fecha} no es un objeto`);
+    }
+    const body = structuredClone(reporte.raw);
+    body.status = input.confirmar ? 2 : 0;
+    const previos = Array.isArray(body.efforts) ? body.efforts : [];
+    body.efforts = [...previos, ...resueltas];
+    await this.#session.postJson(PATH_SAVE_DAILY_REPORT, body);
+    return this.miReporteDiario(fecha);
+  }
+
+  async #resolverLinea(
+    linea: LineaPreparada,
+    catalogo: CategoriaReporte[],
+    proyectos: ProyectoReporte[] | null,
+  ): Promise<Record<string, unknown>> {
+    const categoria = resolverCategoria(catalogo, linea.categoria);
+    if (!categoria.categoryId) {
+      throw new Error(`La categoría "${linea.categoria}" no tiene categoryId`);
+    }
+
+    let projectId: string | null = null;
+    if (linea.proyecto) {
+      const project = buscarProyecto(proyectos ?? [], linea.proyecto);
+      if (!project.id) {
+        throw new Error(`El proyecto ${linea.proyecto} no tiene id`);
+      }
+      projectId = project.id;
+    }
+
+    let workItemId: string | null = null;
+    if (linea.ticket) {
+      const ticket = await this.obtenerTicket(linea.ticket);
+      if (!ticket.id) throw new Error(`El ticket ${linea.ticket} no tiene id`);
+      if (!ticket.project_id) {
+        throw new Error(
+          `El ticket ${linea.ticket} no tiene proyecto; no se puede registrar tiempo ligado`,
+        );
+      }
+      if (projectId && projectId !== ticket.project_id) {
+        throw new Error(
+          `El ticket ${linea.ticket} pertenece a otro proyecto, no a ${linea.proyecto}`,
+        );
+      }
+      projectId = ticket.project_id;
+      workItemId = ticket.id;
+    }
+
+    return {
+      projectId,
+      taskId: null,
+      workItemId,
+      description: linea.descripcion,
+      executed: linea.executed,
+      pending: linea.pending,
+      categoryId: categoria.categoryId,
+      subcategoryId: categoria.id,
+      deleted: false,
+    };
+  }
+
+  async #catalogoCategorias(): Promise<CategoriaReporte[]> {
+    const data = await this.#session.getJson(PATH_SUBCATEGORIES);
+    if (!Array.isArray(data)) return [];
+    return data.filter(isRecord).map(categoriaReporteFromJson);
   }
 
   async #nombreAdjunto(
@@ -466,5 +638,123 @@ function isInside(root: string, candidate: string): boolean {
   return (
     relative === "" ||
     (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+function prepararLinea(linea: LineaTiempoInput, indice: number): LineaPreparada {
+  try {
+    const executed = horasValidas(linea.horas, "Las horas");
+    const descripcion = textoOpcional(linea.descripcion);
+    const proyecto = textoOpcional(linea.proyecto);
+    const ticket = textoOpcional(linea.ticket);
+    if (!ticket && !descripcion) {
+      throw new Error(
+        "La descripción es obligatoria cuando el tiempo no está ligado a un ticket",
+      );
+    }
+    if (!ticket && linea.pendiente != null) {
+      throw new Error("pendiente solo aplica cuando hay un ticket");
+    }
+    const pending = ticket
+      ? linea.pendiente == null
+        ? 0
+        : horasValidas(linea.pendiente, "Las horas pendientes")
+      : null;
+    const categoria = typeof linea.categoria === "string" ? linea.categoria.trim() : "";
+    if (!categoria) throw new Error("La categoría es obligatoria");
+    return { executed, descripcion, proyecto, ticket, pending, categoria };
+  } catch (error) {
+    throw errorDeLinea(indice, error);
+  }
+}
+
+function errorDeLinea(indice: number, error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(`Línea ${indice + 1}: ${message}`);
+}
+
+function textoOpcional(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const limpio = value.trim();
+  return limpio ? limpio : null;
+}
+
+function exigirFecha(fecha: string): string {
+  const dia = fecha.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
+    throw new Error("La fecha debe ser YYYY-MM-DD");
+  }
+  const [year, month, day] = dia.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw new Error("La fecha debe ser YYYY-MM-DD");
+  }
+  return dia;
+}
+
+function horasValidas(horas: number, etiqueta: string): number {
+  if (typeof horas !== "number" || !Number.isFinite(horas) || horas < 0) {
+    throw new Error(`${etiqueta} deben ser un número mayor o igual a 0`);
+  }
+  return Math.round(horas * 1000) / 1000;
+}
+
+function igualTexto(left: string | null, right: string): boolean {
+  return (left ?? "").trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function buscarProyecto(
+  proyectos: ProyectoReporte[],
+  smallCode: string,
+): ProyectoReporte {
+  const found = proyectos.filter((project) =>
+    igualTexto(project.smallCode, smallCode),
+  );
+  if (found.length === 1) return found[0];
+  if (found.length === 0) {
+    const codes = proyectos
+      .map((project) => project.smallCode)
+      .filter((code): code is string => Boolean(code));
+    throw new Error(
+      `No hay un proyecto activo con smallCode "${smallCode}". Activos: ${codes.join(", ") || "ninguno"}.`,
+    );
+  }
+  throw new Error(`Hay varios proyectos con smallCode "${smallCode}".`);
+}
+
+function resolverCategoria(
+  catalogo: CategoriaReporte[],
+  texto: string,
+): CategoriaReporte {
+  const raw = texto.trim();
+  if (!raw) throw new Error("La categoría es obligatoria");
+  const colon = raw.indexOf(":");
+  let categoryName: string | null = null;
+  let name = raw;
+  if (colon >= 0) {
+    categoryName = raw.slice(0, colon).trim();
+    name = raw.slice(colon + 1).trim();
+    if (!categoryName || !name) {
+      throw new Error(`La categoría "${texto}" debe ser "Categoria: Nombre"`);
+    }
+  }
+  const matches = catalogo.filter(
+    (categoria) =>
+      igualTexto(categoria.name, name) &&
+      (categoryName === null || igualTexto(categoria.categoryName, categoryName)),
+  );
+  if (matches.length === 1) return matches[0];
+  if (matches.length === 0) {
+    throw new Error(`No existe la categoría "${texto}"`);
+  }
+  const opciones = matches
+    .map((categoria) => `${categoria.categoryName}: ${categoria.name}`)
+    .join(", ");
+  throw new Error(
+    `La categoría "${texto}" es ambigua. Indica una de: ${opciones}.`,
   );
 }

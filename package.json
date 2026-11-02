@@ -1,7 +1,7 @@
 {
   "name": "bluesurf-mcp",
-  "version": "0.3.0",
-  "description": "Servidor MCP local para leer tickets de BlueSurf, adjuntar archivos y publicar comentarios",
+  "version": "0.4.0",
+  "description": "Servidor MCP local para leer tickets de BlueSurf, adjuntar archivos, publicar comentarios y registrar tiempo",
   "type": "module",
   "license": "MIT",
   "author": "oamilkar",
